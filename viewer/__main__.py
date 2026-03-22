@@ -180,7 +180,7 @@ class ViewerApp(tk.Tk):
         ax.xaxis.label.set_color("#6c7086")
         ax.yaxis.label.set_color("#6c7086")
         ax.zaxis.label.set_color("#6c7086")
-        ax.set_xlabel("X"); ax.set_ylabel("Y"); ax.set_zlabel("Z")
+        ax.set_xlabel("X"); ax.set_ylabel("Z"); ax.set_zlabel("Y")
 
     # ── Data loading ──────────────────────────────────────────────────────────
     def _load_ids(self):
@@ -232,6 +232,7 @@ class ViewerApp(tk.Tk):
         self._frame_idx = 0
         self._slider.config(from_=0, to=T - 1)
         self._slider_var.set(0)
+        self._ax.view_init(elev=20, azim=-90)  # front view: X left-right, Y up
         self._draw_frame(0)
         self._start_anim()
 
@@ -239,26 +240,33 @@ class ViewerApp(tk.Tk):
         joints = self._joints  # (T, 22, 3)
         pos = joints[frame]    # (22, 3)  x, y, z
 
+        # Preserve user rotation across frames (cla() resets the view)
+        elev, azim = self._ax.elev, self._ax.azim
         self._ax.cla()
         self._style_axes()
+        self._ax.view_init(elev=elev, azim=azim)
 
         # Compute axis limits from the full clip for stability
+        # Plot as (x, z, y) so matplotlib's Z-up maps to data's Y-up (height).
+        # Floor is XZ, Y is the wall/height axis.
         lo = joints.min(axis=(0, 1))
         hi = joints.max(axis=(0, 1))
         pad = 0.2
-        self._ax.set_xlim(lo[0] - pad, hi[0] + pad)
-        self._ax.set_ylim(lo[1] - pad, hi[1] + pad)
-        self._ax.set_zlim(lo[2] - pad, hi[2] + pad)
+        self._ax.set_xlim(lo[0] - pad, hi[0] + pad)  # data X → plot X
+        self._ax.set_ylim(lo[2] - pad, hi[2] + pad)  # data Z → plot Y (depth)
+        self._ax.set_zlim(lo[1] - pad, hi[1] + pad)  # data Y → plot Z (up)
 
         # Bones
         for i, j in BONES:
-            xs = [pos[i, 0], pos[j, 0]]
-            ys = [pos[i, 1], pos[j, 1]]
-            zs = [pos[i, 2], pos[j, 2]]
-            self._ax.plot(xs, ys, zs, color="#89b4fa", linewidth=1.8, alpha=0.85)
+            self._ax.plot(
+                [pos[i, 0], pos[j, 0]],  # X
+                [pos[i, 2], pos[j, 2]],  # Z → plot Y
+                [pos[i, 1], pos[j, 1]],  # Y → plot Z (up)
+                color="#89b4fa", linewidth=1.8, alpha=0.85,
+            )
 
         # Joints
-        self._ax.scatter(pos[:, 0], pos[:, 1], pos[:, 2],
+        self._ax.scatter(pos[:, 0], pos[:, 2], pos[:, 1],
                          c="#f38ba8", s=18, zorder=5, depthshade=False)
 
         T = joints.shape[0]
