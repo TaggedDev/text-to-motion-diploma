@@ -9,6 +9,7 @@ from matplotlib.figure import Figure
 from numpy.typing import NDArray
 
 FPS = 20
+_PAD = 0.15
 
 
 class MotionDisplay:
@@ -17,7 +18,7 @@ class MotionDisplay:
 
     def show(self) -> None:
         try:
-            from IPython.display import display, HTML  
+            from IPython.display import display, HTML
             if isinstance(self._content, FuncAnimation):
                 display(HTML(self._content.to_jshtml()))
             else:
@@ -47,40 +48,38 @@ def _load_joints(npy_path: Path) -> NDArray[Any]:
         return data
 
     if data.ndim == 2 and shape[1] == 263:
-        # index 3: root height (y); indices 4:67: joints 1-21 (x, y, z)
         n = shape[0]
         root = np.stack([np.zeros(n), data[:, 3], np.zeros(n)], axis=1)[:, np.newaxis, :]
         joints_1_21 = np.reshape(data[:, 4:67], (n, 21, 3))
         return np.concatenate([root, joints_1_21], axis=1)  # (T, 22, 3)
 
-    raise ValueError(
-        f"Unsupported shape {data.shape}. Expected (T, 22, 3) or (T, 263)."
+    raise ValueError(f"Unsupported shape {data.shape}. Expected (T, 22, 3) or (T, 263).")
+
+
+def _compute_limits(joints: NDArray[Any]) -> tuple[tuple[float, float], ...]:
+    """Compute axis limits from joints of shape (..., 22, 3)."""
+    joints = np.asarray(joints)
+    return (
+        (float(np.min(joints[..., 0])) - _PAD, float(np.max(joints[..., 0])) + _PAD),
+        (float(np.min(joints[..., 2])) - _PAD, float(np.max(joints[..., 2])) + _PAD),
+        (float(np.min(joints[..., 1])) - _PAD, float(np.max(joints[..., 1])) + _PAD),
     )
 
 
-def _plot_joints_on_ax(ax: plt.Axes, pos: NDArray[Any]) -> None:
-    pad = 0.15
-    x_lo = float(np.min(pos[:, 0])) - pad
-    x_hi = float(np.max(pos[:, 0])) + pad
-    y_lo = float(np.min(pos[:, 2])) - pad  # data Z → plot Y
-    y_hi = float(np.max(pos[:, 2])) + pad
-    z_lo = float(np.min(pos[:, 1])) - pad  # data Y → plot Z (up)
-    z_hi = float(np.max(pos[:, 1])) + pad
-    ax.set_xlim(x_lo, x_hi)
-    ax.set_ylim(y_lo, y_hi)
-    ax.set_zlim(z_lo, z_hi)
-    ax.set_xlabel("X")
-    ax.set_ylabel("Z")
-    ax.set_zlabel("Y")
+def _draw_on_ax(
+    ax: plt.Axes,
+    pos: NDArray[Any],
+    title: str = "",
+    limits: Optional[tuple[tuple[float, float], ...]] = None,
+) -> None:
+    xlim, ylim, zlim = limits if limits is not None else _compute_limits(pos)
+    ax.set_xlim(*xlim); ax.set_ylim(*ylim); ax.set_zlim(*zlim)
+    ax.set_xlabel("X"); ax.set_ylabel("Z"); ax.set_zlabel("Y")
     ax.scatter(pos[:, 0], pos[:, 2], pos[:, 1], s=40, depthshade=False)
     ax.view_init(elev=20, azim=-90)
+    if title:
+        ax.set_title(title)
 
-
-def _display_first_frame(npy_path: Path) -> None:
-    draw_frame(npy_path).show()
-
-
-# ── Public API ────────────────────────────────────────────────────────────────
 
 def draw_frame(npy_path: Path, frame_idx: int = 0) -> MotionDisplay:
     joints = _load_joints(npy_path)
@@ -90,11 +89,9 @@ def draw_frame(npy_path: Path, frame_idx: int = 0) -> MotionDisplay:
 
     fig: Figure = plt.figure(figsize=(6, 6))
     ax = fig.add_subplot(111, projection="3d")
-    pos: NDArray[Any] = np.asarray(joints[frame_idx])
-    _plot_joints_on_ax(ax, pos)
-    ax.set_title(f"{npy_path.stem}  —  frame {frame_idx}")
+    _draw_on_ax(ax, joints[frame_idx], title=f"{npy_path.stem}  —  frame {frame_idx}")
     fig.tight_layout()
-    plt.close(fig)  # detach from pyplot to prevent Jupyter auto-display
+    plt.close(fig)
     return MotionDisplay(fig)
 
 
@@ -102,7 +99,7 @@ def draw_frame_slice(
     npy_path: Path,
     start: int = 0,
     end: Optional[int] = None,
-) -> MotionDisplay: 
+) -> MotionDisplay:
     joints = _load_joints(npy_path)
     n_frames = len(joints)
     end = n_frames if end is None else end
@@ -110,29 +107,19 @@ def draw_frame_slice(
     if not (0 <= start < end <= n_frames):
         raise ValueError(f"Invalid slice [{start}:{end}] for T={n_frames}")
 
-    # Fixed axis limits across the full slice for a stable animation
     slice_joints = joints[start:end]
-    pad = 0.15
-    x_lo = float(np.min(slice_joints[:, :, 0])) - pad
-    x_hi = float(np.max(slice_joints[:, :, 0])) + pad
-    y_lo = float(np.min(slice_joints[:, :, 2])) - pad
-    y_hi = float(np.max(slice_joints[:, :, 2])) + pad
-    z_lo = float(np.min(slice_joints[:, :, 1])) - pad
-    z_hi = float(np.max(slice_joints[:, :, 1])) + pad
+    limits = _compute_limits(slice_joints)
 
     fig: Figure = plt.figure(figsize=(6, 6))
     ax = fig.add_subplot(111, projection="3d")
 
     def _animate(i: int) -> None:
         ax.cla()
-        ax.set_xlim(x_lo, x_hi)
-        ax.set_ylim(y_lo, y_hi)
-        ax.set_zlim(z_lo, z_hi)
-        ax.set_xlabel("X"); ax.set_ylabel("Z"); ax.set_zlabel("Y")
-        pos: NDArray[Any] = np.asarray(slice_joints[i])
-        ax.scatter(pos[:, 0], pos[:, 2], pos[:, 1], s=40, depthshade=False)
-        ax.view_init(elev=20, azim=-90)
-        ax.set_title(f"{npy_path.stem}  —  frame {start + i} / {n_frames}")
+        _draw_on_ax(
+            ax, slice_joints[i],
+            title=f"{npy_path.stem}  —  frame {start + i} / {n_frames}",
+            limits=limits,
+        )
 
     anim = FuncAnimation(
         fig, _animate,
