@@ -7,9 +7,21 @@ import numpy as np
 from matplotlib.animation import FuncAnimation
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
+from tqdm.auto import tqdm
 
 FPS = 20
 _PAD = 0.15
+
+# HumanML3D 22-joint kinematic chains (joint indices)
+_KINEMATIC_CHAINS: list[list[int]] = [
+    [0, 1, 4, 7, 10],        # right leg
+    [0, 2, 5, 8, 11],        # left leg
+    [0, 3, 6, 9, 12, 15],    # spine → head
+    [9, 13, 16, 18, 20],     # right arm
+    [9, 14, 17, 19, 21],     # left arm
+]
+
+_CHAIN_COLORS = ["#e03030", "#3060e0", "#30a030", "#e07000", "#a000c0"]
 
 
 class MotionDisplay:
@@ -75,7 +87,15 @@ def _draw_on_ax(
     xlim, ylim, zlim = limits if limits is not None else _compute_limits(pos)
     ax.set_xlim(*xlim); ax.set_ylim(*ylim); ax.set_zlim(*zlim)
     ax.set_xlabel("X"); ax.set_ylabel("Z"); ax.set_zlabel("Y")
-    ax.scatter(pos[:, 0], pos[:, 2], pos[:, 1], s=40, depthshade=False)
+
+    # draw bones
+    for chain, color in zip(_KINEMATIC_CHAINS, _CHAIN_COLORS):
+        ax.plot(pos[chain, 0], pos[chain, 2], pos[chain, 1], color=color, linewidth=2)
+
+    # draw joints
+    ax.scatter(pos[:, 0], pos[:, 2], pos[:, 1], s=20, c="white",
+               edgecolors="black", linewidths=0.5, depthshade=False, zorder=5)
+
     ax.view_init(elev=20, azim=-90)
     if title:
         ax.set_title(title)
@@ -109,9 +129,13 @@ def draw_frame_slice(
 
     slice_joints = joints[start:end]
     limits = _compute_limits(slice_joints)
+    n_render = end - start
 
     fig: Figure = plt.figure(figsize=(6, 6))
     ax = fig.add_subplot(111, projection="3d")
+
+    pbar = tqdm(total=n_render, desc=f"Rendering {npy_path.stem}", unit="frame")
+    _rendered: set[int] = set()
 
     def _animate(i: int) -> None:
         ax.cla()
@@ -120,6 +144,11 @@ def draw_frame_slice(
             title=f"{npy_path.stem}  —  frame {start + i} / {n_frames}",
             limits=limits,
         )
+        if i not in _rendered:
+            _rendered.add(i)
+            pbar.update(1)
+            if len(_rendered) == n_render:
+                pbar.close()
 
     anim = FuncAnimation(
         fig, _animate,
