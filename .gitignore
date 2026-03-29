@@ -3,3 +3,4 @@
 .venv/
 .idea/
 src/geometric.ipynb
+/models/checkpoints/

@@ -68,10 +68,14 @@ def _make_histograms(
 
 
 def load_graph(npy_path: Path) -> Data:
-    joints = _load_joints(npy_path)  # (T, J, 3)
+    raw = np.load(npy_path)           # (T, 263) or (T, J, 3)
+    joints = _load_joints(npy_path)   # (T, J, 3)
     n_frames, n_joints, _ = joints.shape
     pos = torch.tensor(joints.reshape(n_frames * n_joints, 3), dtype=torch.float32)
-    return Data(pos=pos, seq_len=n_frames, num_joints=n_joints)
+    kwargs: dict = {"pos": pos, "seq_len": n_frames, "num_joints": n_joints}
+    if raw.ndim == 2 and raw.shape[1] == 263:
+        kwargs["x"] = torch.tensor(raw, dtype=torch.float32)  # [T, 263] full feature vector
+    return Data(**kwargs)
 
 
 def compute_single(graph: Data) -> PlaneHistograms:
