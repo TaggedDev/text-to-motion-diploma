@@ -4,3 +4,4 @@
 .idea/
 src/geometric.ipynb
 /models/checkpoints/
+/src/diffusion_model.ipynb
